@@ -26,7 +26,7 @@ class DARLModel(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, input_dim, latent_dim, img_size):
         super(Encoder, self).__init__()
-        num_downsamples = 2
+        num_downsamples = 3
         output_size = img_size // (2 ** num_downsamples)
         # self.conv1 = nn.Conv2d(input_dim, 32, kernel_size=3, stride=1, padding=1)
         # self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
@@ -70,20 +70,47 @@ class Encoder(nn.Module):
         return x
 
 
+# class Decoder(nn.Module):
+#     def __init__(self, latent_dim, output_dim, img_size):
+#         super(Decoder, self).__init__()
+#         num_downsamples = 3
+#         output_size = img_size // (2 ** num_downsamples)
+#         self.fc = nn.Linear(latent_dim, 64 * output_size * output_size)
+#         self.conv1 = nn.Conv2d(64, 32, kernel_size=3, stride=1, padding=1)
+#         self.conv2 = nn.Conv2d(32, output_dim, kernel_size=3, stride=1, padding=1)
+#
+#     def forward(self, x):
+#         x = self.fc(x)
+#         x = x.view(x.size(0), 64, 8, 8)
+#         x = F.relu(self.conv1(x))
+#         x = torch.sigmoid(self.conv2(x))
+#         return x
+
 class Decoder(nn.Module):
-    def __init__(self, latent_dim, output_dim, img_size):
+    def __init__(self, latent_dim, output_channels, img_size):
         super(Decoder, self).__init__()
-        num_downsamples = 2
-        output_size = img_size // (2 ** num_downsamples)
-        self.fc = nn.Linear(latent_dim, 64 * output_size * output_size)
-        self.conv1 = nn.Conv2d(64, 32, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(32, output_dim, kernel_size=3, stride=1, padding=1)
+        num_upsamples = 3
+        output_size = img_size // (2 ** num_upsamples)
+
+        self.fc = nn.Linear(latent_dim, 128 * output_size * output_size)
+
+        self.upconv1 = nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.relu1 = nn.ReLU()
+
+        self.upconv2 = nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.relu2 = nn.ReLU()
+
+        self.upconv3 = nn.ConvTranspose2d(32, output_channels, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
         x = self.fc(x)
-        x = x.view(x.size(0), 64, 8, 8)
-        x = F.relu(self.conv1(x))
-        x = torch.sigmoid(self.conv2(x))
+        x = x.view(x.size(0), 128, 7, 7)
+
+        x = self.relu1(self.upconv1(x))
+        x = self.relu2(self.upconv2(x))
+        x = self.sigmoid(self.upconv3(x))
+
         return x
 
 
