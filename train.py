@@ -11,11 +11,11 @@ def main():
     params = {
         "num_epochs": 20,
         "img_size": 224,
-        "latent_dim": 224,
-        "num_classes": 224,
-        "log_interval": 224,
-        "recon_loss_weight": 224,
-        "disent_loss_weight": 224,
+        "latent_dim": 100,
+        "num_classes": 2,
+        "log_interval": 50,
+        "recon_loss_weight": 1.0,
+        "disent_loss_weight": 0.1,
     }
     training = DARL_Train(params)
     training.train()
@@ -32,7 +32,7 @@ class DARL_Train:
         self.recon_loss_weight = args["recon_loss_weight"]
         self.disent_loss_weight = args["disent_loss_weight"]
 
-        self.model = DARLModel(self.img_size, self.latent_dim, self.num_classes)
+        self.model = DARLModel(3, self.latent_dim, self.num_classes, self.img_size)
         self.train_loader, self.val_loader, self.test_loader = get_loader()
 
     def train(self):
