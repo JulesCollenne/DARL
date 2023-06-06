@@ -1,9 +1,10 @@
 import torch
 import torch.optim as optim
+from matplotlib import pyplot as plt
+from torch import nn
 
 from darl import DARLModel
 from data import get_loader
-from losses import compute_reconstruction_loss, compute_disentanglement_loss
 from metrics import plot_losses
 
 
@@ -32,11 +33,17 @@ class DARL_Train:
         self.recon_loss_weight = args["recon_loss_weight"]
         self.disent_loss_weight = args["disent_loss_weight"]
 
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model = DARLModel(3, self.latent_dim, self.num_classes, self.img_size)
+        self.model = self.model.to(self.device)
         self.train_loader, self.val_loader, self.test_loader = get_loader()
 
     def train(self):
+        mean = [0.485, 0.456, 0.406]
+        std = [0.229, 0.224, 0.225]
+
         optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+
         losses = []
         epoch_loss = 0.0
 
@@ -44,12 +51,14 @@ class DARL_Train:
             self.model.train()
 
             for batch_idx, (data, target) in enumerate(self.train_loader):
-                optimizer.zero_grad()
+                data = data.to(self.device)
+                target = target.to(self.device)
 
                 reconstructed, disentangled = self.model(data)
 
-                loss = self.compute_loss(reconstructed, data, disentangled)
+                loss = self.compute_loss(reconstructed, data, disentangled).to(self.device)
 
+                optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
 
@@ -57,6 +66,8 @@ class DARL_Train:
                     print('Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                         epoch, batch_idx * len(data), len(self.train_loader.dataset),
                                100. * batch_idx / len(self.train_loader), loss.item()))
+                    plt.imshow(reconstructed.cpu().detach().permute(0, 2, 3, 1).numpy()[0] * std + mean)
+                    plt.savefig(f"images/{batch_idx}.png")
 
             epoch_loss /= len(self.train_loader)
             losses.append(epoch_loss)
@@ -108,10 +119,26 @@ class DARL_Train:
         average_loss = total_loss / total_samples
         return average_loss
 
-    def compute_loss(self, reconstructed, inputs, disentangled):
-        recon_loss = compute_reconstruction_loss(reconstructed, inputs)
-        disent_loss = compute_disentanglement_loss(disentangled)
-        return self.recon_loss_weight * recon_loss + self.disent_loss_weight * disent_loss
+    def compute_loss(self, reconstructed, classification, target_data, target_labels, recon_loss_weight,
+                     class_loss_weight):
+        # Compute the reconstruction loss
+        recon_loss = nn.MSELoss()(reconstructed, target_data)
+
+        # Compute the classification loss
+        class_loss = nn.CrossEntropyLoss()(classification, target_labels)
+
+        disentangle_loss = nn.MSELoss(latent, labels)
+
+        # Compute the total loss as a combination of reconstruction loss and classification loss
+        total_loss = recon_loss_weight * recon_loss + class_loss_weight * class_loss
+
+        return total_loss
+
+    # def compute_loss(self, reconstructed, inputs, disentangled):
+    #     recon_loss = compute_reconstruction_loss(reconstructed, inputs)
+    #     disent_loss = compute_disentanglement_loss(disentangled)
+    #     class_loss = nn.CrossEntropyLoss()(classification, target_labels)
+    #     return self.recon_loss_weight * recon_loss + self.disent_loss_weight * disent_loss
 
 
 if __name__ == "__main__":

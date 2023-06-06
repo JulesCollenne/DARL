@@ -105,7 +105,7 @@ class Decoder(nn.Module):
 
     def forward(self, x):
         x = self.fc(x)
-        x = x.view(x.size(0), 128, 7, 7)
+        x = x.view(x.size(0), 128, 28, 28)
 
         x = self.relu1(self.upconv1(x))
         x = self.relu2(self.upconv2(x))

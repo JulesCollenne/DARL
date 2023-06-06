@@ -15,8 +15,8 @@ def get_loader(dataset="2020", img_size=224, batch_size=16, workers=4, distribut
         normalize = transforms.Normalize(mean=[0.805, 0.615, 0.587],
                                          std=[0.148, 0.175, 0.201])
     elif dataset == "2020":
-        normalize = transforms.Normalize(mean = [0.485, 0.456, 0.406],
-                                          std = [0.229, 0.224, 0.225])
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                         std=[0.229, 0.224, 0.225])
     else:
         print("Error in dataset!")
         exit()
@@ -177,4 +177,5 @@ class ISIC2020_Dataset(Dataset):
         return image, label
 
     def get_weights(self):
-        return len(self.df["target"]) / len([i for i in self.df["target"] if i == 0.]), len(self.df["target"]) / len([i for i in self.df["target"] if i == 1.])
+        return len(self.df["target"]) / len([i for i in self.df["target"] if i == 0.]), len(self.df["target"]) / len(
+            [i for i in self.df["target"] if i == 1.])
