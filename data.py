@@ -1,12 +1,13 @@
 import os
+import platform
 
 import numpy as np
 import pandas as pd
 
 import torch
+from torch.utils import  data
 import torchvision.transforms as transforms
 from PIL import Image
-from torch.utils import data
 from torch.utils.data import Dataset
 
 
@@ -14,9 +15,19 @@ def get_loader(dataset="2020", img_size=224, batch_size=16, workers=4, distribut
     if dataset == "2020":
         normalize = transforms.Normalize(mean=[0.805, 0.615, 0.587],
                                          std=[0.148, 0.175, 0.201])
+        if platform.system() == 'Windows':
+            dataset_path = "E:\\BDD\\ISIC_2020\\"
+            images_path = "E:\\BDD\\ISIC_2020\\train\\"
+        else:
+            dataset_path = "/home/jules/Travail/isic/ISIC_2020/"
+            images_path = "/home/jules/Travail/isic/ISIC_2020/train/"
     elif dataset == "2020":
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
+        if platform.system() == 'Windows':
+            dataset_path = "E:\\BDD\\ISIC_2020\\train\\"
+        else:
+            dataset_path = "/home/jules/Travail/isic/ISIC_2020/train/"
     else:
         print("Error in dataset!")
         exit()
@@ -37,9 +48,9 @@ def get_loader(dataset="2020", img_size=224, batch_size=16, workers=4, distribut
 
     # Data loading code
     if dataset == "2019":
-        traindir = os.path.join(data, "train")
-        valdir = os.path.join(data, "val")
-        testdir = os.path.join(data, "test")
+        traindir = os.path.join(dataset_path, "train")
+        valdir = os.path.join(dataset_path, "val")
+        testdir = os.path.join(dataset_path, "test")
         train_dataset = CustomImageLoaderFolder(
             traindir,
             transforms_train
@@ -47,23 +58,23 @@ def get_loader(dataset="2020", img_size=224, batch_size=16, workers=4, distribut
         val_dataset = CustomImageLoaderFolder(valdir, transforms_val)
         test_dataset = CustomImageLoaderFolder(testdir, transforms_val)
     else:
-        train_df = pd.read_csv("/home/jules/Travail/isic/ISIC_2020/y_train.csv")
-        val_df = pd.read_csv("/home/jules/Travail/isic/ISIC_2020/y_val.csv")
-        test_df = pd.read_csv("/home/jules/Travail/isic/ISIC_2020/y_test.csv")
+        train_df = pd.read_csv(dataset_path+"y_train.csv")
+        val_df = pd.read_csv(dataset_path+"y_val.csv")
+        test_df = pd.read_csv(dataset_path+"y_test.csv")
         train_dataset = ISIC2020_Dataset(
             train_df,
             transforms_train,
-            dataset_path="/home/jules/Travail/isic/ISIC_2020/train/"
+            dataset_path=images_path
         )
         val_dataset = ISIC2020_Dataset(
             val_df,
             transforms_val,
-            dataset_path="/home/jules/Travail/isic/ISIC_2020/train/"
+            dataset_path=images_path
         )
         test_dataset = ISIC2020_Dataset(
             test_df,
             transforms_train,
-            dataset_path="/home/jules/Travail/isic/ISIC_2020/train/"
+            dataset_path=images_path
         )
 
     if distributed:

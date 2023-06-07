@@ -1,10 +1,14 @@
+from os.path import join
+
 import torch
 import torch.optim as optim
 from matplotlib import pyplot as plt
 from torch import nn
+from tqdm import tqdm
 
 from darl import DARLModel
 from data import get_loader
+from losses import compute_reconstruction_loss, compute_information_bottleneck_loss
 from metrics import plot_losses
 
 
@@ -12,17 +16,18 @@ def main():
     params = {
         "num_epochs": 20,
         "img_size": 224,
+        "batch_size": 16,
         "latent_dim": 100,
         "num_classes": 2,
         "log_interval": 50,
         "recon_loss_weight": 1.0,
         "disent_loss_weight": 0.1,
     }
-    training = DARL_Train(params)
+    training = DarlTrain(params)
     training.train()
 
 
-class DARL_Train:
+class DarlTrain:
 
     def __init__(self, args):
         self.num_epochs = args["num_epochs"]
@@ -32,11 +37,17 @@ class DARL_Train:
         self.log_interval = args["log_interval"]
         self.recon_loss_weight = args["recon_loss_weight"]
         self.disent_loss_weight = args["disent_loss_weight"]
+        self.batch_size = args["batch_size"]
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        if self.device == 'cuda':
+            print("Using GPU...")
+        else:
+            print("WARNING : Using CPU!")
+            print("Training will be very slow!")
         self.model = DARLModel(3, self.latent_dim, self.num_classes, self.img_size)
         self.model = self.model.to(self.device)
-        self.train_loader, self.val_loader, self.test_loader = get_loader()
+        self.train_loader, self.val_loader, self.test_loader = get_loader(batch_size=self.batch_size)
 
     def train(self):
         mean = [0.485, 0.456, 0.406]
@@ -47,16 +58,16 @@ class DARL_Train:
         losses = []
         epoch_loss = 0.0
 
-        for epoch in range(self.num_epochs):
+        for epoch in tqdm(range(self.num_epochs)):
             self.model.train()
 
             for batch_idx, (data, target) in enumerate(self.train_loader):
                 data = data.to(self.device)
                 target = target.to(self.device)
 
-                reconstructed, disentangled = self.model(data)
+                z, reconstructed, logits = self.model(data)
 
-                loss = self.compute_loss(reconstructed, data, disentangled).to(self.device)
+                loss = self.compute_loss(z, reconstructed, logits, data, target).to(self.device)
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -65,9 +76,9 @@ class DARL_Train:
                 if batch_idx % self.log_interval == 0:
                     print('Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                         epoch, batch_idx * len(data), len(self.train_loader.dataset),
-                               100. * batch_idx / len(self.train_loader), loss.item()))
+                        100. * batch_idx / len(self.train_loader), loss.item()))
                     plt.imshow(reconstructed.cpu().detach().permute(0, 2, 3, 1).numpy()[0] * std + mean)
-                    plt.savefig(f"images/{batch_idx}.png")
+                    plt.savefig(join("images", f"{batch_idx}.png"))
 
             epoch_loss /= len(self.train_loader)
             losses.append(epoch_loss)
@@ -78,19 +89,22 @@ class DARL_Train:
         torch.save(self.model.state_dict(), 'darl_model.pth')
         plot_losses(losses, "darl_losses.png")
 
-        # In this example, we assume you have a DARLModel class that defines your DARL model and provides the forward method to compute the reconstructed and disentangled outputs. You can customize the loss functions (compute_reconstruction_loss and compute_disentanglement_loss) according to the specific disentanglement objectives and techniques you are using.
+        # In this example, we assume you have a DARLModel class that defines your DARL model and provides the forward
+        # method to compute the reconstructed and disentangled outputs. You can customize the loss functions (
+        # compute_reconstruction_loss and compute_disentanglement_loss) according to the specific disentanglement
+        # objectives and techniques you are using.
         #
-        # The training loop iterates over the epochs and batches of the training dataset. For each batch, it performs the forward pass, computes the reconstruction loss and disentanglement loss, and combines them into a total loss using the specified weights. The backward pass is then performed to compute the gradients, and the optimizer is used to update the model parameters.
+        # The training loop iterates over the epochs and batches of the training dataset. For each batch, it performs
+        # the forward pass, computes the reconstruction loss and disentanglement loss, and combines them into a total
+        # loss using the specified weights. The backward pass is then performed to compute the gradients,
+        # and the optimizer is used to update the model parameters.
         #
-        # Remember to adjust the hyperparameters, such as learning rate, number of epochs, and batch size, according to your specific requirements.
+        # Remember to adjust the hyperparameters, such as learning rate, number of epochs, and batch size, according
+        # to your specific requirements.
 
     def evaluate(self):
         """
         Evaluate the DARL model on the validation dataset.
-
-        Args:
-            model: The DARL model.
-            val_loader: DataLoader for the validation dataset.
 
         Returns:
             float: Evaluation metric (e.g., accuracy, loss).
@@ -102,35 +116,37 @@ class DARL_Train:
         total_samples = 0
 
         with torch.no_grad():
-            for batch in self.val_loader:
-                inputs, targets = batch
+            for batch_idx, (data, target) in enumerate(self.val_loader):
+                data = data.to(self.device)
+                target = target.to(self.device)
 
-                reconstructed, disentangled = self.model(inputs)
+                z, reconstructed, logits = self.model(data)
 
-                loss = self.compute_loss(reconstructed, inputs, disentangled)
-
-                batch_size = inputs.size(0)
+                loss = self.compute_loss(z, reconstructed, logits, data, target).to(self.device)
 
                 # Accumulate the total loss
-                total_loss += loss.item() * batch_size
-                total_samples += batch_size
+                total_loss += loss.item() * self.batch_size
+                total_samples += self.batch_size
 
         # Calculate the average evaluation metric
         average_loss = total_loss / total_samples
         return average_loss
 
-    def compute_loss(self, reconstructed, classification, target_data, target_labels, recon_loss_weight,
-                     class_loss_weight):
+    def compute_loss(self, z, reconstructed, logits, original_img, target,
+                     recon_loss_weight=1.0, class_loss_weight=0.5, disentangle_loss_weight=0.2):
         # Compute the reconstruction loss
-        recon_loss = nn.MSELoss()(reconstructed, target_data)
+        recon_loss = compute_reconstruction_loss(reconstructed, original_img)
 
         # Compute the classification loss
-        class_loss = nn.CrossEntropyLoss()(classification, target_labels)
+        class_loss = nn.CrossEntropyLoss()(logits, target)
 
-        disentangle_loss = nn.MSELoss(latent, labels)
+        # disentangle_loss = nn.MSELoss(z, labels)
+        disentangle_loss = compute_information_bottleneck_loss(z, self.batch_size)
 
         # Compute the total loss as a combination of reconstruction loss and classification loss
-        total_loss = recon_loss_weight * recon_loss + class_loss_weight * class_loss
+        total_loss = recon_loss_weight * recon_loss + \
+                     class_loss_weight * class_loss + \
+                     disentangle_loss * disentangle_loss_weight
 
         return total_loss
 

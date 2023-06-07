@@ -1,6 +1,4 @@
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class DARLModel(nn.Module):
@@ -20,7 +18,7 @@ class DARLModel(nn.Module):
         # Classify latent representation
         logits = self.classifier(z)
 
-        return reconstructed, logits
+        return z, reconstructed, logits
 
 
 class Encoder(nn.Module):
