@@ -35,5 +35,5 @@ class AdversarialModel(nn.Module):
 
         x = x.view(x.size(0), -1)
         x = self.fc(x)
-        x = torch.sigmoid(x)
+        # x = torch.sigmoid(x)
         return x

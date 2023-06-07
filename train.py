@@ -62,6 +62,9 @@ class DarlTrain:
         adv_optimizer = optim.Adam(self.adv_model.parameters(), lr=0.001)
         adv_criterion = nn.CrossEntropyLoss()
 
+        self.real_labels = torch.ones(self.batch_size).type(torch.LongTensor)
+        self.fake_labels = torch.zeros(self.batch_size).type(torch.LongTensor)
+
         losses = []
         epoch_loss = 0.0
 
@@ -69,6 +72,7 @@ class DarlTrain:
             self.model.train()
             self.adv_model.train()
 
+            print("Training the discriminator...")
             for batch_idx, (data, target) in enumerate(self.train_loader):
                 data = data.to(self.device)
                 z, reconstructed, logits = self.model(data)
@@ -77,16 +81,13 @@ class DarlTrain:
                 # Train the discriminator
                 # ------------
 
-                real_labels = torch.ones(self.batch_size).type(torch.LongTensor)
-                fake_labels = torch.zeros(self.batch_size).type(torch.LongTensor)
-
                 adv_optimizer.zero_grad()
 
                 real_outputs = self.adv_model(data)
-                real_loss = adv_criterion(real_outputs, real_labels.type(torch.LongTensor).to(self.device))
+                real_loss = adv_criterion(real_outputs, self.real_labels.to(self.device))
 
                 fake_outputs = self.adv_model(reconstructed)
-                fake_loss = adv_criterion(fake_outputs, fake_labels.to(self.device))
+                fake_loss = adv_criterion(fake_outputs, self.fake_labels.to(self.device))
 
                 adv_loss = real_loss + fake_loss
                 adv_loss.backward()
@@ -96,12 +97,10 @@ class DarlTrain:
                     print('Epoch: {} [{}/{} ({:.0f}%)]\tAdv Loss: {:.6f}'.format(
                         epoch, batch_idx * len(data), len(self.train_loader.dataset),
                                100. * batch_idx / len(self.train_loader), adv_loss.item()))
-                    denormalized_recons = reconstructed.cpu().detach().numpy()[0] * \
-                                          np.expand_dims(np.asarray(std), axis=(1, 2)) + \
-                                          np.expand_dims(np.asarray(mean), axis=(1, 2))
-                    plt.imshow(denormalized_recons.transpose(1, 2, 0))
-                    plt.savefig(join("images", f"{batch_idx}.png"))
+                    if adv_loss.item() < 1e-5:
+                        break
 
+            print("Training the generator...")
             for batch_idx, (data, target) in enumerate(self.train_loader):
                 # ------------
                 # Train the generator
@@ -189,12 +188,12 @@ class DarlTrain:
         recon_loss = compute_reconstruction_loss(reconstructed, original_img)
 
         # Compute the classification loss
-        class_loss = nn.CrossEntropyLoss()()(logits, target)
+        class_loss = nn.CrossEntropyLoss()(logits, target)
 
         # disentangle_loss = nn.MSELoss(z, labels)
         disentangle_loss = compute_information_bottleneck_loss(z, self.batch_size)
 
-        adv_loss = nn.CrossEntropyLoss()(self.adv_model(reconstructed), torch.ones(self.batch_size, 1))
+        adv_loss = nn.CrossEntropyLoss()(self.adv_model(reconstructed), self.real_labels.to(self.device))
 
         # Compute the total loss as a combination of reconstruction loss and classification loss
         total_loss = recon_loss_weight * recon_loss + \
