@@ -131,9 +131,9 @@ class DarlTrain:
 
             epoch_loss /= len(self.train_loader)
             losses.append(epoch_loss)
-            self.model.eval()
-            with torch.no_grad():
-                self.evaluate()
+            # self.model.eval()
+            # with torch.no_grad():
+            #     self.evaluate()
 
         torch.save(self.model.state_dict(), 'darl_model.pth')
         plot_losses(losses, "darl_losses.png")
