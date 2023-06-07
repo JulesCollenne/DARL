@@ -1,11 +1,12 @@
 from os.path import join
 
+import numpy as np
 import torch
 import torch.optim as optim
 from matplotlib import pyplot as plt
 from torch import nn
-from tqdm import tqdm
 
+from adversarial_model import AdversarialModel
 from darl import DARLModel
 from data import get_loader
 from losses import compute_reconstruction_loss, compute_information_bottleneck_loss
@@ -16,8 +17,8 @@ def main():
     params = {
         "num_epochs": 20,
         "img_size": 224,
-        "batch_size": 16,
-        "latent_dim": 100,
+        "batch_size": 4,
+        "latent_dim": 20,
         "num_classes": 2,
         "log_interval": 50,
         "recon_loss_weight": 1.0,
@@ -39,14 +40,18 @@ class DarlTrain:
         self.disent_loss_weight = args["disent_loss_weight"]
         self.batch_size = args["batch_size"]
 
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        if self.device == 'cuda':
-            print("Using GPU...")
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            print(f"CUDA device count: {torch.cuda.device_count()}")
+            print(f"Current CUDA device: {torch.cuda.current_device()}")
         else:
-            print("WARNING : Using CPU!")
-            print("Training will be very slow!")
+            self.device = torch.device("cpu")
+            print("CUDA is not available.")
+
         self.model = DARLModel(3, self.latent_dim, self.num_classes, self.img_size)
         self.model = self.model.to(self.device)
+        self.adv_model = AdversarialModel(3, self.num_classes, self.img_size)
+        self.adv_model = self.adv_model.to(self.device)
         self.train_loader, self.val_loader, self.test_loader = get_loader(batch_size=self.batch_size)
 
     def train(self):
@@ -54,30 +59,75 @@ class DarlTrain:
         std = [0.229, 0.224, 0.225]
 
         optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+        adv_optimizer = optim.Adam(self.adv_model.parameters(), lr=0.001)
+        adv_criterion = nn.CrossEntropyLoss()
 
         losses = []
         epoch_loss = 0.0
 
-        for epoch in tqdm(range(self.num_epochs)):
+        for epoch in range(self.num_epochs):
             self.model.train()
+            self.adv_model.train()
 
             for batch_idx, (data, target) in enumerate(self.train_loader):
                 data = data.to(self.device)
-                target = target.to(self.device)
-
                 z, reconstructed, logits = self.model(data)
 
-                loss = self.compute_loss(z, reconstructed, logits, data, target).to(self.device)
+                # ------------
+                # Train the discriminator
+                # ------------
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                real_labels = torch.ones(self.batch_size).type(torch.LongTensor)
+                fake_labels = torch.zeros(self.batch_size).type(torch.LongTensor)
+
+                adv_optimizer.zero_grad()
+
+                real_outputs = self.adv_model(data)
+                real_loss = adv_criterion(real_outputs, real_labels.type(torch.LongTensor).to(self.device))
+
+                fake_outputs = self.adv_model(reconstructed)
+                fake_loss = adv_criterion(fake_outputs, fake_labels.to(self.device))
+
+                adv_loss = real_loss + fake_loss
+                adv_loss.backward()
+                adv_optimizer.step()
 
                 if batch_idx % self.log_interval == 0:
-                    print('Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                    print('Epoch: {} [{}/{} ({:.0f}%)]\tAdv Loss: {:.6f}'.format(
                         epoch, batch_idx * len(data), len(self.train_loader.dataset),
-                        100. * batch_idx / len(self.train_loader), loss.item()))
-                    plt.imshow(reconstructed.cpu().detach().permute(0, 2, 3, 1).numpy()[0] * std + mean)
+                               100. * batch_idx / len(self.train_loader), adv_loss.item()))
+                    denormalized_recons = reconstructed.cpu().detach().numpy()[0] * \
+                                          np.expand_dims(np.asarray(std), axis=(1, 2)) + \
+                                          np.expand_dims(np.asarray(mean), axis=(1, 2))
+                    plt.imshow(denormalized_recons.transpose(1, 2, 0))
+                    plt.savefig(join("images", f"{batch_idx}.png"))
+
+            for batch_idx, (data, target) in enumerate(self.train_loader):
+                # ------------
+                # Train the generator
+                # ------------
+
+                data = data.to(self.device)
+                target = target.to(self.device)
+                z, reconstructed, logits = self.model(data)
+
+                optimizer.zero_grad()
+
+                autoencoder_loss = self.compute_loss(z, reconstructed, logits, data, target)
+                autoencoder_loss.backward()
+                optimizer.step()
+
+                # losses.append(total_loss.item())
+                # epoch_loss += total_loss.item()
+
+                if batch_idx % self.log_interval == 0:
+                    print('Epoch: {} [{}/{} ({:.0f}%)]\tAE Loss: {:.6f}'.format(
+                        epoch, batch_idx * len(data), len(self.train_loader.dataset),
+                               100. * batch_idx / len(self.train_loader), autoencoder_loss.item()))
+                    denormalized_recons = reconstructed.cpu().detach().numpy()[0] * \
+                                          np.expand_dims(np.asarray(std), axis=(1, 2)) + \
+                                          np.expand_dims(np.asarray(mean), axis=(1, 2))
+                    plt.imshow(denormalized_recons.transpose(1, 2, 0))
                     plt.savefig(join("images", f"{batch_idx}.png"))
 
             epoch_loss /= len(self.train_loader)
@@ -133,20 +183,24 @@ class DarlTrain:
         return average_loss
 
     def compute_loss(self, z, reconstructed, logits, original_img, target,
-                     recon_loss_weight=1.0, class_loss_weight=0.5, disentangle_loss_weight=0.2):
+                     recon_loss_weight=1.0, class_loss_weight=0.5, disentangle_loss_weight=0.2,
+                     adv_loss_weight=0.5):
         # Compute the reconstruction loss
         recon_loss = compute_reconstruction_loss(reconstructed, original_img)
 
         # Compute the classification loss
-        class_loss = nn.CrossEntropyLoss()(logits, target)
+        class_loss = nn.CrossEntropyLoss()()(logits, target)
 
         # disentangle_loss = nn.MSELoss(z, labels)
         disentangle_loss = compute_information_bottleneck_loss(z, self.batch_size)
 
+        adv_loss = nn.CrossEntropyLoss()(self.adv_model(reconstructed), torch.ones(self.batch_size, 1))
+
         # Compute the total loss as a combination of reconstruction loss and classification loss
         total_loss = recon_loss_weight * recon_loss + \
                      class_loss_weight * class_loss + \
-                     disentangle_loss * disentangle_loss_weight
+                     disentangle_loss_weight * disentangle_loss + \
+                     adv_loss * adv_loss_weight
 
         return total_loss
 
