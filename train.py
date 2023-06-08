@@ -18,7 +18,7 @@ def main():
         "num_epochs": 20,
         "img_size": 224,
         "batch_size": 4,
-        "latent_dim": 20,
+        "latent_dim": 200,
         "num_classes": 2,
         "log_interval": 50,
         "recon_loss_weight": 1.0,
@@ -129,6 +129,9 @@ class DarlTrain:
                     plt.imshow(denormalized_recons.transpose(1, 2, 0))
                     plt.savefig(join("images", f"{batch_idx}.png"))
 
+                if 100. * batch_idx / len(self.train_loader) > 10.:
+                    break
+
             epoch_loss /= len(self.train_loader)
             losses.append(epoch_loss)
             # self.model.eval()
@@ -191,6 +194,8 @@ class DarlTrain:
         class_loss = nn.CrossEntropyLoss()(logits, target)
 
         # disentangle_loss = nn.MSELoss(z, labels)
+        self.batch_size = z.size()[0]
+        self.real_labels = torch.ones(self.batch_size).type(torch.LongTensor)
         disentangle_loss = compute_information_bottleneck_loss(z, self.batch_size)
 
         adv_loss = nn.CrossEntropyLoss()(self.adv_model(reconstructed), self.real_labels.to(self.device))
