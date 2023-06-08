@@ -196,15 +196,23 @@ class DarlTrain:
         # disentangle_loss = nn.MSELoss(z, labels)
         self.batch_size = z.size()[0]
         self.real_labels = torch.ones(self.batch_size).type(torch.LongTensor)
-        disentangle_loss = compute_information_bottleneck_loss(z, self.batch_size)
+
+        use_disentangle = False
+        if use_disentangle:
+            disentangle_loss = compute_information_bottleneck_loss(z, self.batch_size)
 
         adv_loss = nn.CrossEntropyLoss()(self.adv_model(reconstructed), self.real_labels.to(self.device))
 
         # Compute the total loss as a combination of reconstruction loss and classification loss
-        total_loss = recon_loss_weight * recon_loss + \
-                     class_loss_weight * class_loss + \
-                     disentangle_loss_weight * disentangle_loss + \
-                     adv_loss * adv_loss_weight
+        if use_disentangle:
+            total_loss = recon_loss_weight * recon_loss + \
+                         class_loss_weight * class_loss + \
+                         disentangle_loss_weight * disentangle_loss + \
+                         adv_loss * adv_loss_weight
+        else:
+            total_loss = recon_loss_weight * recon_loss + \
+                         class_loss_weight * class_loss + \
+                         adv_loss * adv_loss_weight
 
         return total_loss
 
